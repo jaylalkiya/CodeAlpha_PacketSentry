@@ -47,6 +47,8 @@ python packet_sentry.py -v                    # show each packet's layer structu
 python packet_sentry_gui.py
 ```
 
+![PacketSentry GUI](docs/gui.png)
+
 A Wireshark-style window with a terminal / hacker theme (black background,
 neon-green monospace text), built with Tkinter (ships with Python, nothing extra
 to install), using the same capture and detection code as the CLI:
@@ -62,6 +64,27 @@ to install), using the same capture and detection code as the CLI:
 
 Live capture still needs the GUI to be launched from an Administrator / root
 terminal.
+
+## Try it in 30 seconds (no admin needed)
+
+`make_demo_pcap.py` writes a small, fully synthetic capture - made-up
+addresses and credentials over FTP, HTTP, POP3 and IMAP, plus clean DNS,
+ICMP, ARP and HTTPS traffic - so you can see every detection fire without
+running a server or sniffing anyone's real traffic:
+
+```
+python make_demo_pcap.py                     # writes demo.pcap
+python packet_sentry.py -r demo.pcap -v -p   # CLI
+python packet_sentry_gui.py                  # GUI -> OPEN PCAP -> demo.pcap
+```
+
+## Files
+
+| File | What it is |
+|------|------------|
+| `packet_sentry.py` | Capture + analysis engine and command-line interface |
+| `packet_sentry_gui.py` | Tkinter desktop GUI on top of the same engine |
+| `make_demo_pcap.py` | Generates a synthetic `demo.pcap` for testing / demos |
 
 ## Sample output (CLI)
 

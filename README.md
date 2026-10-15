@@ -13,13 +13,18 @@ show *why* visibility into raw traffic matters from a defensive standpoint.
 
 - Captures live packets with `scapy`.
 - Parses ARP, TCP, UDP, ICMP and DNS queries.
+- Shows each packet's layer structure on request (`Ether(14) / IP(20) /
+  TCP(20) / Raw(64)` - every layer and the bytes its header takes up), to see
+  how protocols are stacked inside a single frame.
 - Prints a one-line summary per packet: timestamp, protocol, source/destination
   IP and port, and (optionally) a printable preview of the payload.
 - Flags unencrypted-protocol traffic and anything that looks like a plaintext
-  username/password pair.
+  credential: form fields (`password=...`), FTP/POP3 `USER`/`PASS`, IMAP
+  `LOGIN` and HTTP Basic `Authorization` headers.
 - Prints an end-of-capture summary: packet counts by protocol, top talkers,
   and every flagged finding in one place.
-- Can save the capture to a `.pcap` file for later analysis in Wireshark.
+- Can save the capture to a `.pcap` file, and read one back (`-r`) for
+  offline analysis - which needs no admin rights.
 
 ## Usage
 
@@ -32,9 +37,45 @@ python packet_sentry.py -i "Wi-Fi" -c 200     # capture 200 packets on Wi-Fi
 python packet_sentry.py -f "tcp port 80"      # only HTTP traffic (BPF filter)
 python packet_sentry.py -p                    # show payload previews too
 python packet_sentry.py -w capture.pcap       # also save to a pcap file
+python packet_sentry.py -r capture.pcap -v -p  # analyse a saved capture
+python packet_sentry.py -v                    # show each packet's layer structure
 ```
 
-Needs **Administrator / root** to open a raw socket. On Windows you also need
+## Sample output
+
+```
+PacketSentry - reading capture.pcap
+12:12:41 ARP   192.168.1.10 who-has 192.168.1.1  (hw aa:bb:cc:dd:ee:ff)
+   Ether(14) / ARP(28)
+12:12:41 UDP   192.168.1.10:5353 -> 8.8.8.8:53  query=example.com
+   Ether(14) / IP(20) / UDP(8) / DNS(29)
+12:12:41 TCP   192.168.1.10:40000 -> 192.168.1.50:21 [unencrypted FTP, possible plaintext credential]
+   Ether(14) / IP(20) / TCP(20) / Raw(14)
+   PASS hunter2..
+12:12:41 TCP   192.168.1.10:40001 -> 192.168.1.50:80 [unencrypted HTTP, possible plaintext credential]
+   Ether(14) / IP(20) / TCP(20) / Raw(64)
+   POST /login HTTP/1.1..Host: s....username=jay&password=secret123
+
+============================================================
+Capture summary
+============================================================
+Total packets: 4
+
+By protocol:
+   TCP      2
+   ARP      1
+   UDP      1
+
+Top talkers:
+   192.168.1.10       4 packet(s)
+
+2 finding(s) flagged:
+   12:12:41  192.168.1.10:40000 -> 192.168.1.50:21  -> unencrypted FTP, possible plaintext credential
+   12:12:41  192.168.1.10:40001 -> 192.168.1.50:80  -> unencrypted HTTP, possible plaintext credential
+```
+
+Live capture needs **Administrator / root** to open a raw socket (reading a
+saved `.pcap` with `-r` does not). On Windows you also need
 [Npcap](https://npcap.com) installed (tick "WinPcap API-compatible mode"
 during setup) — plain `pip install scapy` is not enough on its own.
 

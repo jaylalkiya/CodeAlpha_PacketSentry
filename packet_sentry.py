@@ -12,6 +12,8 @@ protocols that were never encrypted to begin with (HTTP, FTP, Telnet).
     python packet_sentry.py -i "Wi-Fi" -c 200     capture 200 packets on Wi-Fi
     python packet_sentry.py -f "tcp port 80"      only HTTP traffic
     python packet_sentry.py -w capture.pcap       also save to a pcap file
+    python packet_sentry.py -r capture.pcap       analyse a saved capture
+    python packet_sentry.py -v                    show each packet's layer structure
 
 Needs scapy, and on Windows also Npcap (https://npcap.com - tick 'WinPcap
 API-compatible mode' at setup). Needs Administrator / root to open a raw
@@ -26,13 +28,22 @@ import ctypes
 import os
 import re
 import sys
+import warnings
 from collections import Counter
 from datetime import datetime
 
 IS_WIN = sys.platform == "win32"
 
+# scapy's TLS module trips a cryptography deprecation warning on import that
+# has nothing to do with sniffing - keep it out of the capture output.
+warnings.filterwarnings("ignore", message=".*Diffie-Hellman.*")
+
 CREDENTIAL_RE = re.compile(
-    rb"(user(name)?|pass(word)?|pwd|login)\s*[:=]\s*\S+", re.IGNORECASE)
+    rb"(user(name)?|pass(word)?|pwd|login)\s*[:=]\s*\S+"  # key=value fields
+    rb"|^(USER|PASS)\s+\S+"                                # FTP / POP3 commands
+    rb"|^\S+\s+LOGIN\s+\S+\s+\S+"                          # IMAP LOGIN user pass
+    rb"|^Authorization:\s*Basic\s+\S+",                     # HTTP Basic auth
+    re.IGNORECASE | re.MULTILINE)
 PLAINTEXT_PORTS = {21: "FTP", 23: "Telnet", 80: "HTTP", 110: "POP3", 143: "IMAP"}
 
 COLOR = {
@@ -84,6 +95,18 @@ def printable_preview(data, limit=80):
     return text + ("..." if len(data) > limit else "")
 
 
+def layer_structure(pkt):
+    """Packet -> 'Ether(14) / IP(20) / TCP(20) / Raw(35)': each layer and
+    how many bytes of the packet its header takes up."""
+    parts = []
+    layer = pkt
+    while layer and layer.name != "NoPayload":
+        header_len = len(layer) - len(layer.payload)
+        parts.append(f"{layer.__class__.__name__}({header_len})")
+        layer = layer.payload
+    return " / ".join(parts)
+
+
 class Stats:
     def __init__(self):
         self.total = 0
@@ -122,19 +145,21 @@ class Stats:
                          "in this capture.", "green", color))
 
 
-def describe_packet(pkt, stats, use_color, show_payload):
+def describe_packet(pkt, stats, use_color, show_payload, show_layers):
     from scapy.all import ARP, DNS, DNSQR, ICMP, IP, TCP, UDP
 
-    ts = datetime.now().strftime("%H:%M:%S")
+    ts = datetime.fromtimestamp(float(pkt.time)).strftime("%H:%M:%S")
 
     if pkt.haslayer(ARP):
         arp = pkt[ARP]
         op = "who-has" if arp.op == 1 else "is-at" if arp.op == 2 else str(arp.op)
         stats.record("ARP", arp.psrc)
         line = (f"{paint(ts, 'dim', use_color)} "
-                f"{paint('ARP', 'blue', use_color):<18} "
+                f"{paint('ARP  ', 'blue', use_color)} "
                 f"{arp.psrc} {op} {arp.pdst}  (hw {arp.hwsrc})")
         print(line)
+        if show_layers:
+            print("   " + paint(layer_structure(pkt), "dim", use_color))
         return
 
     if not pkt.haslayer(IP):
@@ -158,7 +183,7 @@ def describe_packet(pkt, stats, use_color, show_payload):
                  else f"{src} -> {dst}")
 
     color = {"TCP": "cyan", "UDP": "yellow", "ICMP": "magenta"}.get(proto, "reset")
-    header = f"{paint(ts, 'dim', use_color)} {paint(proto, color, use_color):<18} {endpoints}"
+    header = f"{paint(ts, 'dim', use_color)} {paint(f'{proto:<5}', color, use_color)} {endpoints}"
 
     payload = bytes(layer.payload) if layer is not None and layer.payload else b""
 
@@ -185,6 +210,8 @@ def describe_packet(pkt, stats, use_color, show_payload):
         stats.flag(f"{ts}  {endpoints}  -> " + ", ".join(risk_bits))
 
     print(header)
+    if show_layers:
+        print("   " + paint(layer_structure(pkt), "dim", use_color))
     if show_payload and payload:
         preview = printable_preview(payload)
         if preview.strip():
@@ -215,6 +242,10 @@ def main():
     parser.add_argument("-t", "--timeout", type=int, default=0,
                          help="stop after N seconds (0 = no timeout)")
     parser.add_argument("-w", "--pcap", help="also save the capture to this .pcap file")
+    parser.add_argument("-r", "--read",
+                         help="analyse a saved .pcap file instead of live traffic")
+    parser.add_argument("-v", "--layers", action="store_true",
+                         help="show each packet's layer structure and header sizes")
     parser.add_argument("-p", "--payload", action="store_true",
                          help="show a printable preview of each packet's payload")
     parser.add_argument("--no-color", action="store_true", help="disable colored output")
@@ -233,7 +264,7 @@ def main():
         list_interfaces()
         return 0
 
-    if not is_admin():
+    if not args.read and not is_admin():
         print("Needs Administrator / root to open a raw socket - "
               "re-run elevated.")
         return 1
@@ -243,15 +274,23 @@ def main():
     captured = []
 
     def on_packet(pkt):
-        describe_packet(pkt, stats, use_color, args.payload)
+        describe_packet(pkt, stats, use_color, args.payload, args.layers)
         if args.pcap:
             captured.append(pkt)
 
-    print(paint("PacketSentry - capturing. Ctrl+C to stop.", "cyan", use_color))
+    if args.read:
+        if not os.path.isfile(args.read):
+            print(f"No such capture file: {args.read}")
+            return 1
+        print(paint(f"PacketSentry - reading {args.read}", "cyan", use_color))
+        source = {"offline": args.read}
+    else:
+        print(paint("PacketSentry - capturing. Ctrl+C to stop.", "cyan", use_color))
+        source = {"iface": args.iface or None,
+                  "timeout": args.timeout or None}
     try:
-        sniff(iface=args.iface or None, filter=args.filter or None,
-              prn=on_packet, count=args.count or 0,
-              timeout=args.timeout or None, store=False)
+        sniff(filter=args.filter or None, prn=on_packet,
+              count=args.count or 0, store=False, **source)
     except KeyboardInterrupt:
         pass
     except OSError as exc:

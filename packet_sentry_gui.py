@@ -23,10 +23,89 @@ DEFAULT_IFACE = "(default interface)"
 POLL_MS = 100
 BATCH = 500            # max packets moved from the sniffer thread per poll
 
-PROTO_COLORS = {"TCP": "#0b6e99", "UDP": "#9a6700", "ICMP": "#8250df",
-                "ARP": "#1f6feb"}
-FLAG_BG = "#ffd7d5"
-FLAG_FG = "#a40e26"
+# Hacker / terminal palette
+BG = "#0a0e0a"          # window background
+PANEL = "#0f150f"       # tables and text panes
+FIELD = "#131c13"       # entries, buttons
+BORDER = "#1f3a1f"
+GREEN = "#00ff41"       # main "matrix" green
+DIM = "#3d8c40"         # secondary text
+SELECT = "#0f4d1a"
+FONT = "Consolas"
+
+PROTO_COLORS = {"TCP": "#00ff41", "UDP": "#e5ff00", "ICMP": "#ff00ff",
+                "ARP": "#00e5ff"}
+FLAG_BG = "#3a0008"
+FLAG_FG = "#ff3355"
+
+BANNER = "[ PACKET::SENTRY ]  network sniffer // codealpha task 1"
+
+
+def apply_theme(root):
+    """Restyle every ttk widget into a black / neon-green terminal look."""
+    style = ttk.Style(root)
+    style.theme_use("clam")          # the only built-in theme that takes colors
+    root.configure(bg=BG)
+    base = (FONT, 10)
+
+    style.configure(".", background=BG, foreground=GREEN, font=base,
+                    fieldbackground=FIELD, bordercolor=BORDER,
+                    darkcolor=BG, lightcolor=BG, troughcolor=BG,
+                    selectbackground=SELECT, selectforeground=GREEN,
+                    insertcolor=GREEN, focuscolor=GREEN)
+    style.configure("TFrame", background=BG)
+    style.configure("TLabel", background=BG, foreground=GREEN)
+    style.configure("Banner.TLabel", font=(FONT, 15, "bold"), foreground=GREEN)
+    style.configure("Status.TLabel", background=PANEL, foreground=DIM)
+    style.configure("Prompt.TLabel", background=PANEL, foreground=GREEN,
+                    font=(FONT, 10, "bold"))
+    style.configure("Status.TFrame", background=PANEL)
+
+    style.configure("TButton", background=FIELD, foreground=GREEN,
+                    bordercolor=DIM, padding=(6, 3), font=(FONT, 10, "bold"))
+    style.map("TButton",
+              background=[("disabled", BG), ("pressed", GREEN), ("active", SELECT)],
+              foreground=[("disabled", BORDER), ("pressed", BG)],
+              bordercolor=[("disabled", BORDER), ("active", GREEN)])
+
+    style.configure("TEntry", fieldbackground=FIELD, foreground=GREEN,
+                    bordercolor=DIM, insertcolor=GREEN)
+    style.configure("TCombobox", fieldbackground=FIELD, background=FIELD,
+                    foreground=GREEN, arrowcolor=GREEN, bordercolor=DIM)
+    style.map("TCombobox", fieldbackground=[("readonly", FIELD)],
+              foreground=[("readonly", GREEN)],
+              selectbackground=[("readonly", FIELD)],
+              selectforeground=[("readonly", GREEN)])
+    root.option_add("*TCombobox*Listbox.background", PANEL)
+    root.option_add("*TCombobox*Listbox.foreground", GREEN)
+    root.option_add("*TCombobox*Listbox.selectBackground", SELECT)
+    root.option_add("*TCombobox*Listbox.selectForeground", GREEN)
+    root.option_add("*TCombobox*Listbox.font", base)
+
+    style.configure("TCheckbutton", background=BG, foreground=GREEN,
+                    indicatorbackground=FIELD, indicatorforeground=GREEN)
+    style.map("TCheckbutton", background=[("active", BG)],
+              indicatorbackground=[("selected", FIELD)])
+
+    style.configure("Treeview", background=PANEL, fieldbackground=PANEL,
+                    foreground=GREEN, rowheight=22, bordercolor=BORDER,
+                    font=base)
+    style.map("Treeview", background=[("selected", SELECT)],
+              foreground=[("selected", "#ffffff")])
+    style.configure("Treeview.Heading", background=FIELD, foreground=GREEN,
+                    bordercolor=BORDER, font=(FONT, 10, "bold"), relief="flat")
+    style.map("Treeview.Heading", background=[("active", SELECT)])
+
+    style.configure("TLabelframe", background=BG, bordercolor=DIM)
+    style.configure("TLabelframe.Label", background=BG, foreground=GREEN,
+                    font=(FONT, 10, "bold"))
+    style.configure("TPanedwindow", background=BG)
+    style.configure("Sash", sashthickness=6, gripcount=0, background=BORDER)
+    style.configure("TSeparator", background=DIM)
+    for orient in ("Vertical", "Horizontal"):
+        style.configure(f"{orient}.TScrollbar", background=FIELD,
+                        troughcolor=BG, bordercolor=BG, arrowcolor=DIM)
+        style.map(f"{orient}.TScrollbar", background=[("active", SELECT)])
 
 
 def hexdump(data, width=16):
@@ -51,6 +130,8 @@ class PacketSentryApp:
         self.sniffer = None
         self.reset_state()
 
+        apply_theme(root)
+        self.build_banner()
         self.build_toolbar()
         self.build_body()
         self.build_statusbar()
@@ -66,11 +147,24 @@ class PacketSentryApp:
 
     # ------------------------------------------------------------ layout
 
+    def build_banner(self):
+        top = ttk.Frame(self.root, padding=(10, 8, 10, 0))
+        top.pack(fill="x")
+        ttk.Label(top, text=BANNER, style="Banner.TLabel").pack(side="left")
+        self.cursor = ttk.Label(top, text="_", style="Banner.TLabel")
+        self.cursor.pack(side="left")
+        self.blink()
+
+    def blink(self):
+        visible = self.cursor.cget("text") == "_"
+        self.cursor.configure(text=" " if visible else "_")
+        self.root.after(530, self.blink)
+
     def build_toolbar(self):
-        bar = ttk.Frame(self.root, padding=(8, 8, 8, 4))
+        bar = ttk.Frame(self.root, padding=(8, 8, 8, 6))
         bar.pack(fill="x")
 
-        ttk.Label(bar, text="Interface").pack(side="left")
+        ttk.Label(bar, text="iface>").pack(side="left")
         self.iface_var = tk.StringVar(value=DEFAULT_IFACE)
         names = [DEFAULT_IFACE]
         try:
@@ -78,26 +172,26 @@ class PacketSentryApp:
         except Exception:
             pass
         ttk.Combobox(bar, textvariable=self.iface_var, values=names,
-                     width=24, state="readonly").pack(side="left", padx=(4, 12))
+                     width=20, state="readonly", font=(FONT, 10)).pack(side="left", padx=(4, 12))
 
-        ttk.Label(bar, text="BPF filter").pack(side="left")
+        ttk.Label(bar, text="filter>").pack(side="left")
         self.filter_var = tk.StringVar()
-        ttk.Entry(bar, textvariable=self.filter_var, width=18).pack(
+        ttk.Entry(bar, textvariable=self.filter_var, width=16, font=(FONT, 10)).pack(
             side="left", padx=(4, 12))
 
-        self.start_btn = ttk.Button(bar, text="Start", command=self.start_live)
+        self.start_btn = ttk.Button(bar, text="> START", command=self.start_live)
         self.start_btn.pack(side="left")
-        self.stop_btn = ttk.Button(bar, text="Stop", command=self.stop,
+        self.stop_btn = ttk.Button(bar, text="x STOP", command=self.stop,
                                    state="disabled")
         self.stop_btn.pack(side="left", padx=4)
         ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=8)
-        ttk.Button(bar, text="Open pcap...", command=self.open_pcap).pack(side="left")
-        ttk.Button(bar, text="Save pcap...", command=self.save_pcap).pack(
+        ttk.Button(bar, text="OPEN PCAP", command=self.open_pcap).pack(side="left")
+        ttk.Button(bar, text="SAVE PCAP", command=self.save_pcap).pack(
             side="left", padx=4)
-        ttk.Button(bar, text="Clear", command=self.clear).pack(side="left")
+        ttk.Button(bar, text="CLEAR", command=self.clear).pack(side="left")
 
         self.only_flagged = tk.BooleanVar()
-        ttk.Checkbutton(bar, text="Only flagged", variable=self.only_flagged,
+        ttk.Checkbutton(bar, text="only flagged", variable=self.only_flagged,
                         command=self.refill_table).pack(side="right")
 
     def build_body(self):
@@ -107,8 +201,8 @@ class PacketSentryApp:
         # Packet table
         table_frame = ttk.Frame(panes)
         cols = ("no", "time", "proto", "src", "dst", "len", "info")
-        heads = ("No.", "Time", "Protocol", "Source", "Destination", "Length", "Info")
-        widths = (55, 75, 70, 170, 170, 60, 460)
+        heads = ("#", "TIME", "PROTO", "SOURCE", "DESTINATION", "LEN", "INFO")
+        widths = (50, 85, 65, 190, 190, 55, 440)
         self.tree = ttk.Treeview(table_frame, columns=cols, show="headings",
                                  selectmode="browse")
         for col, head, width in zip(cols, heads, widths):
@@ -129,21 +223,24 @@ class PacketSentryApp:
 
         # Detail + summary side by side
         lower = ttk.PanedWindow(panes, orient="horizontal")
-        detail_box = ttk.LabelFrame(lower, text="Packet detail", padding=4)
+        detail_box = ttk.LabelFrame(lower, text=" packet.inspect ", padding=4)
         self.detail = self.make_text(detail_box, wrap="none")
         lower.add(detail_box, weight=3)
-        summary_box = ttk.LabelFrame(lower, text="Capture summary", padding=4)
+        summary_box = ttk.LabelFrame(lower, text=" capture.summary ", padding=4)
         self.summary = self.make_text(summary_box, wrap="word")
         lower.add(summary_box, weight=2)
         panes.add(lower, weight=2)
 
-        self.write(self.detail, "Select a packet to see its layers, "
+        self.write(self.detail, "> select a packet to inspect its layers, "
                    "findings and payload.")
         self.update_summary()
 
     def make_text(self, parent, wrap):
-        text = tk.Text(parent, wrap=wrap, font=("Consolas", 10), height=12,
-                       relief="flat", borderwidth=0, padx=6, pady=4)
+        text = tk.Text(parent, wrap=wrap, font=(FONT, 10), height=12,
+                       relief="flat", borderwidth=0, padx=6, pady=4,
+                       background=PANEL, foreground=GREEN,
+                       insertbackground=GREEN, selectbackground=SELECT,
+                       selectforeground="#ffffff", highlightthickness=0)
         scroll = ttk.Scrollbar(parent, orient="vertical", command=text.yview)
         text.configure(yscrollcommand=scroll.set, state="disabled")
         if wrap == "none":
@@ -151,20 +248,24 @@ class PacketSentryApp:
                                     command=text.xview)
             text.configure(xscrollcommand=xscroll.set)
             xscroll.pack(side="bottom", fill="x")
-        text.tag_configure("head", font=("Consolas", 10, "bold"))
-        text.tag_configure("risk", foreground=FLAG_FG,
-                           font=("Consolas", 10, "bold"))
-        text.tag_configure("ok", foreground="#1a7f37")
+        text.tag_configure("head", font=(FONT, 10, "bold"), foreground="#ffffff")
+        text.tag_configure("risk", foreground=FLAG_FG, font=(FONT, 10, "bold"))
+        text.tag_configure("ok", foreground=GREEN)
         text.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
         return text
 
     def build_statusbar(self):
         self.status_var = tk.StringVar(
-            value="Ready. Start a live capture or open a .pcap file. "
-                  "Only capture on networks you are authorised to monitor.")
-        ttk.Label(self.root, textvariable=self.status_var, anchor="w",
-                  padding=(8, 4)).pack(fill="x", side="bottom")
+            value="ready. start a live capture or open a .pcap file. "
+                  "only capture on networks you are authorised to monitor.")
+        bar = ttk.Frame(self.root, style="Status.TFrame")
+        bar.pack(fill="x", side="bottom")
+        ttk.Label(bar, text="root@packetsentry:~#", style="Prompt.TLabel",
+                  padding=(8, 4)).pack(side="left")
+        ttk.Label(bar, textvariable=self.status_var, anchor="w",
+                  style="Status.TLabel", padding=(6, 4)).pack(
+                      side="left", fill="x", expand=True)
 
     # ------------------------------------------------------------ capture
 
@@ -382,7 +483,7 @@ class PacketSentryApp:
             self.queue.queue.clear()
         self.reset_state()
         self.tree.delete(*self.tree.get_children())
-        self.write(self.detail, "Select a packet to see its layers, "
+        self.write(self.detail, "> select a packet to inspect its layers, "
                    "findings and payload.")
         self.update_summary()
         self.status_var.set("Cleared.")
@@ -400,10 +501,6 @@ def main():
         except Exception:
             pass
     root = tk.Tk()
-    try:
-        ttk.Style(root).theme_use("vista" if sys.platform == "win32" else "clam")
-    except tk.TclError:
-        pass
     PacketSentryApp(root)
     root.mainloop()
 

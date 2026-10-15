@@ -47,7 +47,8 @@ python packet_sentry.py -v                    # show each packet's layer structu
 python packet_sentry_gui.py
 ```
 
-A Wireshark-style window built with Tkinter (ships with Python, nothing extra
+A Wireshark-style window with a terminal / hacker theme (black background,
+neon-green monospace text), built with Tkinter (ships with Python, nothing extra
 to install), using the same capture and detection code as the CLI:
 
 - Interface picker, BPF filter box, **Start / Stop** live capture.

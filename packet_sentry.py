@@ -145,25 +145,26 @@ class Stats:
                          "in this capture.", "green", color))
 
 
-def describe_packet(pkt, stats, use_color, show_payload, show_layers):
+def analyse_packet(pkt):
+    """Packet -> dict of what PacketSentry knows about it, or None if it is
+    neither ARP nor IP. Shared by the command-line and GUI front ends."""
     from scapy.all import ARP, DNS, DNSQR, ICMP, IP, TCP, UDP
 
-    ts = datetime.fromtimestamp(float(pkt.time)).strftime("%H:%M:%S")
+    info = {"time": datetime.fromtimestamp(float(pkt.time)).strftime("%H:%M:%S"),
+            "length": len(pkt), "layers": layer_structure(pkt),
+            "sport": None, "dport": None, "detail": "", "risks": [],
+            "payload": b""}
 
     if pkt.haslayer(ARP):
         arp = pkt[ARP]
         op = "who-has" if arp.op == 1 else "is-at" if arp.op == 2 else str(arp.op)
-        stats.record("ARP", arp.psrc)
-        line = (f"{paint(ts, 'dim', use_color)} "
-                f"{paint('ARP  ', 'blue', use_color)} "
-                f"{arp.psrc} {op} {arp.pdst}  (hw {arp.hwsrc})")
-        print(line)
-        if show_layers:
-            print("   " + paint(layer_structure(pkt), "dim", use_color))
-        return
+        info.update(proto="ARP", src=arp.psrc, dst=arp.pdst,
+                    endpoints=f"{arp.psrc} {op} {arp.pdst}",
+                    detail=f"hw {arp.hwsrc}")
+        return info
 
     if not pkt.haslayer(IP):
-        return
+        return None
 
     ip = pkt[IP]
     src, dst = ip.src, ip.dst
@@ -177,58 +178,70 @@ def describe_packet(pkt, stats, use_color, show_payload, show_layers):
     else:
         layer, proto, sport, dport = None, f"IP-{ip.proto}", None, None
 
-    stats.record(proto, src)
-
     endpoints = (f"{src}:{sport} -> {dst}:{dport}" if sport is not None
                  else f"{src} -> {dst}")
-
-    color = {"TCP": "cyan", "UDP": "yellow", "ICMP": "magenta"}.get(proto, "reset")
-    header = f"{paint(ts, 'dim', use_color)} {paint(f'{proto:<5}', color, use_color)} {endpoints}"
-
     payload = bytes(layer.payload) if layer is not None and layer.payload else b""
+    info.update(proto=proto, src=src, dst=dst, sport=sport, dport=dport,
+                endpoints=endpoints, payload=payload)
 
     # DNS query names are useful even when not showing full payloads.
     if pkt.haslayer(DNS) and pkt.haslayer(DNSQR) and pkt[DNS].qdcount:
         try:
             qname = pkt[DNSQR].qname.decode(errors="replace").rstrip(".")
-            header += f"  query={qname}"
+            info["detail"] = f"query={qname}"
         except Exception:
             pass
 
-    risk_bits = []
     if dport in PLAINTEXT_PORTS or sport in PLAINTEXT_PORTS:
         proto_name = PLAINTEXT_PORTS.get(dport) or PLAINTEXT_PORTS.get(sport)
-        risk_bits.append(f"unencrypted {proto_name}")
+        info["risks"].append(f"unencrypted {proto_name}")
+    if payload and CREDENTIAL_RE.search(payload):
+        info["risks"].append("possible plaintext credential")
+    return info
 
-    cred_match = CREDENTIAL_RE.search(payload) if payload else None
-    if cred_match:
-        risk_bits.append("possible plaintext credential")
 
-    if risk_bits:
-        tag = paint(" [" + ", ".join(risk_bits) + "]", "red", use_color)
-        header += tag
-        stats.flag(f"{ts}  {endpoints}  -> " + ", ".join(risk_bits))
+def describe_packet(pkt, stats, use_color, show_payload, show_layers):
+    info = analyse_packet(pkt)
+    if info is None:
+        return
+    proto, ts = info["proto"], info["time"]
+    stats.record(proto, info["src"])
+
+    color = {"TCP": "cyan", "UDP": "yellow", "ICMP": "magenta",
+             "ARP": "blue"}.get(proto, "reset")
+    header = (f"{paint(ts, 'dim', use_color)} "
+              f"{paint(f'{proto:<5}', color, use_color)} {info['endpoints']}")
+    if info["detail"]:
+        detail = info["detail"]
+        header += f"  ({detail})" if proto == "ARP" else f"  {detail}"
+    if info["risks"]:
+        risks = ", ".join(info["risks"])
+        header += paint(f" [{risks}]", "red", use_color)
+        stats.flag(f"{ts}  {info['endpoints']}  -> {risks}")
 
     print(header)
     if show_layers:
-        print("   " + paint(layer_structure(pkt), "dim", use_color))
-    if show_payload and payload:
-        preview = printable_preview(payload)
+        print("   " + paint(info["layers"], "dim", use_color))
+    if show_payload and info["payload"]:
+        preview = printable_preview(info["payload"])
         if preview.strip():
             print("   " + paint(preview, "dim", use_color))
 
 
-def list_interfaces():
-    from scapy.all import get_if_list
+def interfaces():
+    """[(name, description)] for every capture interface scapy can see."""
     try:
         from scapy.arch.windows import get_windows_if_list
-        for iface in get_windows_if_list():
-            print(f"  {iface.get('name')!r:<30} {iface.get('description', '')}")
-        return
+        return [(i.get("name"), i.get("description", ""))
+                for i in get_windows_if_list()]
     except Exception:
-        pass
-    for name in get_if_list():
-        print(f"  {name}")
+        from scapy.all import get_if_list
+        return [(name, "") for name in get_if_list()]
+
+
+def list_interfaces():
+    for name, desc in interfaces():
+        print(f"  {name!r:<30} {desc}")
 
 
 def main():

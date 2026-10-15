@@ -41,7 +41,28 @@ python packet_sentry.py -r capture.pcap -v -p  # analyse a saved capture
 python packet_sentry.py -v                    # show each packet's layer structure
 ```
 
-## Sample output
+## Desktop GUI
+
+```
+python packet_sentry_gui.py
+```
+
+A Wireshark-style window built with Tkinter (ships with Python, nothing extra
+to install), using the same capture and detection code as the CLI:
+
+- Interface picker, BPF filter box, **Start / Stop** live capture.
+- Live packet table coloured by protocol; flagged packets are highlighted red.
+- **Only flagged** toggle to cut straight to the findings.
+- Packet detail pane: layer structure, findings, a hex/ASCII payload dump and
+  every decoded field.
+- Running capture summary: protocol counts, top talkers, flagged findings.
+- **Open pcap... / Save pcap...** - opening a saved capture needs no admin
+  rights, so it's the easiest way to try it out.
+
+Live capture still needs the GUI to be launched from an Administrator / root
+terminal.
+
+## Sample output (CLI)
 
 ```
 PacketSentry - reading capture.pcap
